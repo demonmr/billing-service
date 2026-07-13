@@ -79,6 +79,13 @@ billing:
     # local testing (e.g. "*/30 * * * * *" = every
     # 30s).
     auto-renewal-cron: ${BILLING_AUTO_RENEWAL_CRON:0 0 3 * * *}
+  renewal:
+    # Phase 4.3 — toggle for testing dunning.
+    # When true, every auto-renewal attempt
+    # returns false (failure), so the failure
+    # counter advances and the 3-strikes
+    # deactivation kicks in. Off in production.
+    simulate-fail: ${BILLING_RENEWAL_SIMULATE_FAIL:false}
 
 # Phase 4.3 — ShedLock JDBC provider. The lock
 # table is auto-created by shedlock-spring on
