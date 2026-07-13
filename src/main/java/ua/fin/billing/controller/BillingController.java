@@ -48,20 +48,16 @@ public class BillingController implements BillingApi {
         final String userIdString = CurrentUser.getUserId();
         if (userIdString == null) {
             // No JWT in the request — should have been
-            // rejected by the security filter (Commit 6
-            // wires the security config). For the
-            // open endpoints (Commit 1 stub) we return
+            // rejected by the security filter. Return
             // 401 explicitly so the contract is honored.
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
         final UUID userId = UUID.fromString(userIdString);
         final PaymentProvider provider = mapProvider(checkoutRequest.getProvider());
 
-        if (provider == PaymentProvider.STRIPE) {
-            // Commit 4 — return 501 until Stripe is wired in.
-            return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED).build();
-        }
-
+        // Commit 4: both providers wired. LiqPay via
+        // LiqPayClient (Commit 3), Stripe via
+        // StripeClient (this commit).
         final CheckoutResult result = checkoutService.checkout(
             userId, checkoutRequest.getPlanId(), provider
         );

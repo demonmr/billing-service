@@ -1,8 +1,8 @@
-// Unit test for Phase 4.3 (commit 3) — verifies the
-// wired `BillingController` returns 201 for LiqPay
-// checkout + 501 for Stripe (until Commit 4). The real
-// provider call is mocked out — the test only asserts
-// the controller's behaviour (status code + body shape).
+// Unit test for Phase 4.3 (commits 3 + 4) — verifies
+// the wired `BillingController` returns 201 for both
+// LiqPay and Stripe checkouts. The real provider call
+// is mocked out — the test only asserts the
+// controller's behaviour (status code + body shape).
 //
 // The auth-lib `CurrentUser` is a static utility; the
 // test does not exercise JWT auth (addFilters=false
@@ -96,7 +96,11 @@ class BillingControllerStubTest {
     }
 
     @Test
-    void createCheckout_stripe_returns501_untilCommit4() throws Exception {
+    void createCheckout_stripe_returns201_withCheckoutUrl() throws Exception {
+        // given — Commit 4 wired the Stripe branch.
+        // The controller now returns 201 for STRIPE
+        // too (it used to return 501 in Commit 3).
+        final UUID paymentId = UUID.randomUUID();
         final UUID userId = UUID.randomUUID();
         SecurityContextHolder.getContext().setAuthentication(
             new JwtAuthenticationToken(
@@ -106,6 +110,15 @@ class BillingControllerStubTest {
                 java.util.List.of()
             )
         );
+        when(checkoutService.checkout(
+            any(UUID.class), any(UUID.class), eq(PaymentProvider.STRIPE)
+        )).thenReturn(new CheckoutService.CheckoutResult(
+            paymentId,
+            URI.create("https://checkout.stripe.com/c/pay/cs_test_abc"),
+            PaymentProvider.STRIPE
+        ));
+
+        // when + then
         final String body = """
             {
               "planId": "00000000-0000-0000-0000-000000000001",
@@ -115,6 +128,10 @@ class BillingControllerStubTest {
         mockMvc.perform(post("/rest/ua.fin.api/billing/checkout")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body))
-            .andExpect(status().isNotImplemented());
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.paymentId").value(paymentId.toString()))
+            .andExpect(jsonPath("$.checkoutUrl").value(
+                "https://checkout.stripe.com/c/pay/cs_test_abc"))
+            .andExpect(jsonPath("$.provider").value("STRIPE"));
     }
 }
