@@ -16,6 +16,7 @@ import ua.fin.billing.entity.Payment;
 import ua.fin.billing.entity.PaymentProvider;
 import ua.fin.billing.entity.WebhookEvent;
 import ua.fin.billing.repository.PaymentRepository;
+import ua.fin.billing.service.InvoiceService;
 import ua.fin.billing.service.WebhookService;
 
 import java.io.IOException;
@@ -73,15 +74,18 @@ public class StripeWebhookController {
     private final StripeWebhookVerifier stripeWebhookVerifier;
     private final WebhookService webhookService;
     private final PaymentRepository paymentRepository;
+    private final InvoiceService invoiceService;
 
     public StripeWebhookController(
         StripeWebhookVerifier stripeWebhookVerifier,
         WebhookService webhookService,
-        PaymentRepository paymentRepository
+        PaymentRepository paymentRepository,
+        InvoiceService invoiceService
     ) {
         this.stripeWebhookVerifier = stripeWebhookVerifier;
         this.webhookService = webhookService;
         this.paymentRepository = paymentRepository;
+        this.invoiceService = invoiceService;
     }
 
     @PostMapping("/stripe")
@@ -190,6 +194,21 @@ public class StripeWebhookController {
         payment.setStatus(ua.fin.billing.entity.PaymentStatus.SUCCEEDED);
         payment.setProviderPaymentId(session.getId());
         paymentRepository.save(payment);
+        // Commit 5: generate the invoice PDF.
+        // Idempotent — re-deliveries return the
+        // existing invoice. Failures are logged
+        // and swallowed so the payment transition
+        // isn't blocked (the payment is already
+        // SUCCEEDED, a missing invoice is fixable
+        // out of band).
+        try {
+            invoiceService.generateOrFetch(payment);
+        } catch (RuntimeException e) {
+            log.error(
+                "Invoice generation failed for paymentId={} (payment still SUCCEEDED)",
+                payment.getPaymentId(), e
+            );
+        }
         webhookService.markCompleted(claim, payment.getPaymentId());
         log.info(
             "Stripe payment {} marked SUCCEEDED (orderId={}, sessionId={})",

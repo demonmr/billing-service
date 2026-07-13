@@ -14,6 +14,7 @@ import ua.fin.billing.client.liqpay.LiqPayWebhookPayload;
 import ua.fin.billing.entity.Payment;
 import ua.fin.billing.entity.PaymentProvider;
 import ua.fin.billing.entity.WebhookEvent;
+import ua.fin.billing.service.InvoiceService;
 import ua.fin.billing.service.PaymentService;
 import ua.fin.billing.service.WebhookService;
 
@@ -57,15 +58,18 @@ public class LiqPayWebhookController {
     private final LiqPayClient liqPayClient;
     private final PaymentService paymentService;
     private final WebhookService webhookService;
+    private final InvoiceService invoiceService;
 
     public LiqPayWebhookController(
         LiqPayClient liqPayClient,
         PaymentService paymentService,
-        WebhookService webhookService
+        WebhookService webhookService,
+        InvoiceService invoiceService
     ) {
         this.liqPayClient = liqPayClient;
         this.paymentService = paymentService;
         this.webhookService = webhookService;
+        this.invoiceService = invoiceService;
     }
 
     @PostMapping(
@@ -124,6 +128,21 @@ public class LiqPayWebhookController {
                         : null,
                     payload.description()
                 );
+                // Commit 5: generate the invoice
+                // PDF + persist. Idempotent — a
+                // re-delivery returns the existing
+                // invoice. Failures here are
+                // non-fatal: the payment is already
+                // SUCCEEDED, we log + ack so LiqPay
+                // doesn't retry forever.
+                try {
+                    invoiceService.generateOrFetch(payment);
+                } catch (RuntimeException e) {
+                    log.error(
+                        "Invoice generation failed for paymentId={} (payment still SUCCEEDED)",
+                        payment.getPaymentId(), e
+                    );
+                }
                 webhookService.markCompleted(claim.get(), payment.getPaymentId());
                 log.info(
                     "LiqPay payment {} marked SUCCEEDED (orderId={}, providerPaymentId={})",

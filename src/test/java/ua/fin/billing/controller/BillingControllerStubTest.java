@@ -28,17 +28,26 @@ import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.web.servlet.MockMvc;
+import ua.fin.billing.entity.Invoice;
+import ua.fin.billing.entity.Payment;
 import ua.fin.billing.entity.PaymentProvider;
+import ua.fin.billing.entity.PaymentStatus;
 import ua.fin.billing.service.CheckoutService;
 import ua.fin.secure.lib.JwtAuthenticationToken;
 
+import java.math.BigDecimal;
 import java.net.URI;
+import java.time.OffsetDateTime;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -51,6 +60,12 @@ class BillingControllerStubTest {
 
     @MockitoBean
     private CheckoutService checkoutService;
+
+    @MockitoBean
+    private ua.fin.billing.service.InvoiceService invoiceService;
+
+    @MockitoBean
+    private ua.fin.billing.repository.PaymentRepository paymentRepository;
 
     @Test
     void createCheckout_liqpay_returns201_withCheckoutUrl() throws Exception {
@@ -133,5 +148,131 @@ class BillingControllerStubTest {
             .andExpect(jsonPath("$.checkoutUrl").value(
                 "https://checkout.stripe.com/c/pay/cs_test_abc"))
             .andExpect(jsonPath("$.provider").value("STRIPE"));
+    }
+
+    // ----------------------------------------------------------------
+    // Commit 5: PDF invoice download.
+    // ----------------------------------------------------------------
+
+    @Test
+    void downloadInvoicePdf_happyPath_returnsPdfBytes() throws Exception {
+        // given — requester is the payer,
+        // invoice exists.
+        final UUID userId = UUID.randomUUID();
+        final UUID paymentId = UUID.randomUUID();
+        final byte[] pdfBytes = "%PDF-1.4\n%fake-pdf\n".getBytes();
+        SecurityContextHolder.getContext().setAuthentication(
+            new JwtAuthenticationToken(
+                "test-token",
+                Jwts.claims().add("id", userId.toString()).build(),
+                userId.toString(),
+                java.util.List.of()
+            )
+        );
+        final Payment payment = Payment.builder()
+            .paymentId(paymentId)
+            .userId(userId)
+            .provider(PaymentProvider.LIQPAY)
+            .providerOrderId("ord-1")
+            .amount(new BigDecimal("199.00"))
+            .currency("UAH")
+            .status(PaymentStatus.SUCCEEDED)
+            .failureCount(0)
+            .createdAt(OffsetDateTime.now())
+            .updatedAt(OffsetDateTime.now())
+            .build();
+        final Invoice invoice = Invoice.builder()
+            .invoiceId(UUID.randomUUID())
+            .paymentId(paymentId)
+            .invoiceNumber("INV-20260713-00001")
+            .pdfBlob(pdfBytes)
+            .generatedAt(OffsetDateTime.now())
+            .build();
+        when(paymentRepository.findById(paymentId))
+            .thenReturn(Optional.of(payment));
+        when(invoiceService.findByPaymentId(paymentId))
+            .thenReturn(Optional.of(invoice));
+
+        // when + then
+        mockMvc.perform(get("/rest/ua.fin.api/billing/invoices/{id}/pdf",
+                paymentId))
+            .andExpect(status().isOk())
+            .andExpect(content().contentType(MediaType.APPLICATION_PDF))
+            .andExpect(header().string("Content-Disposition",
+                org.hamcrest.Matchers.containsString(
+                    "invoice-INV-20260713-00001.pdf")))
+            .andExpect(content().bytes(pdfBytes));
+    }
+
+    @Test
+    void downloadInvoicePdf_requesterMismatch_returns403() throws Exception {
+        // given — requester is NOT the payer.
+        final UUID requesterId = UUID.randomUUID();
+        final UUID payerId = UUID.randomUUID(); // different
+        final UUID paymentId = UUID.randomUUID();
+        SecurityContextHolder.getContext().setAuthentication(
+            new JwtAuthenticationToken(
+                "test-token",
+                Jwts.claims().add("id", requesterId.toString()).build(),
+                requesterId.toString(),
+                java.util.List.of()
+            )
+        );
+        final Payment payment = Payment.builder()
+            .paymentId(paymentId)
+            .userId(payerId)
+            .provider(PaymentProvider.STRIPE)
+            .providerOrderId("ord-2")
+            .amount(new BigDecimal("9.99"))
+            .currency("USD")
+            .status(PaymentStatus.SUCCEEDED)
+            .failureCount(0)
+            .createdAt(OffsetDateTime.now())
+            .updatedAt(OffsetDateTime.now())
+            .build();
+        when(paymentRepository.findById(paymentId))
+            .thenReturn(Optional.of(payment));
+
+        // when + then
+        mockMvc.perform(get("/rest/ua.fin.api/billing/invoices/{id}/pdf",
+                paymentId))
+            .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void downloadInvoicePdf_invoiceNotGenerated_returns404() throws Exception {
+        // given — payment exists, invoice
+        // doesn't (webhook hasn't completed
+        // yet).
+        final UUID userId = UUID.randomUUID();
+        final UUID paymentId = UUID.randomUUID();
+        SecurityContextHolder.getContext().setAuthentication(
+            new JwtAuthenticationToken(
+                "test-token",
+                Jwts.claims().add("id", userId.toString()).build(),
+                userId.toString(),
+                java.util.List.of()
+            )
+        );
+        final Payment payment = Payment.builder()
+            .paymentId(paymentId)
+            .userId(userId)
+            .provider(PaymentProvider.LIQPAY)
+            .providerOrderId("ord-3")
+            .amount(new BigDecimal("199.00"))
+            .currency("UAH")
+            .status(PaymentStatus.PENDING)
+            .failureCount(0)
+            .createdAt(OffsetDateTime.now())
+            .updatedAt(OffsetDateTime.now())
+            .build();
+        when(paymentRepository.findById(paymentId))
+            .thenReturn(Optional.of(payment));
+        when(invoiceService.findByPaymentId(paymentId))
+            .thenReturn(Optional.empty());
+
+        mockMvc.perform(get("/rest/ua.fin.api/billing/invoices/{id}/pdf",
+                paymentId))
+            .andExpect(status().isNotFound());
     }
 }
