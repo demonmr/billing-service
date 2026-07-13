@@ -163,6 +163,18 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- OkHttp MockWebServer — used by
+             LiqPayClientTest (Commit 3) to spin up a
+             fake LiqPay endpoint in-process. Comes as a
+             transitive dep of stripe-java (which the
+             LiqPay test borrows) so we just declare it
+             explicitly. -->
+        <dependency>
+            <groupId>com.squareup.okhttp3</groupId>
+            <artifactId>mockwebserver</artifactId>
+            <version>4.12.0</version>
+            <scope>test</scope>
+        </dependency>
         <!-- Spring Boot 4.x moved @WebMvcTest to a
              dedicated `spring-boot-webmvc-test`
              artifact (was previously in

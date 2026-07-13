@@ -4,70 +4,92 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.RestController;
+import ua.fin.secure.lib.CurrentUser;
 import ua.fin.billing.api.BillingApi;
+import ua.fin.billing.entity.PaymentProvider;
 import ua.fin.billing.model.CheckoutRequest;
 import ua.fin.billing.model.CheckoutResponse;
+import ua.fin.billing.service.CheckoutService;
+import ua.fin.billing.service.CheckoutService.CheckoutResult;
 
-import java.net.URI;
+import java.util.UUID;
 
 /**
- * Phase 4.3 (commit 1) — STUB {@link BillingApi}
- * implementation. The generated {@code BillingApi}
- * interface (from the OpenAPI contract) declares
- * only the auth'd, JSON-bodied endpoints. The two
- * webhook endpoints (LiqPay + Stripe, un-auth'd,
- * form-encoded / raw body) and the binary PDF
- * download are NOT in the generated interface —
- * they have separate controllers
- * ({@link LiqPayWebhookController},
- * {@link StripeWebhookController}, and the
- * PDF endpoint becomes a method on this class in
- * commit 5).
+ * Phase 4.3 (commit 3) — implements the generated
+ * {@link BillingApi} interface. The
+ * {@code createCheckout} endpoint is now real for
+ * {@code provider=LIQPAY} (Commit 3); Stripe is wired
+ * in Commit 4. The two webhook endpoints and the PDF
+ * download are NOT in the generated interface — they
+ * have separate controllers (see
+ * {@link LiqPayWebhookController}, and
+ * {@code StripeWebhookController} in Commit 4, plus
+ * the {@code downloadInvoicePdf} method which lands
+ * in Commit 5).
  *
- * <p>Right now {@link #createCheckout} returns
- * {@code 501 Not Implemented} with a stub body.
- * The real implementation lands in commit 3
- * (LiqPay) and commit 4 (Stripe).</p>
- *
- * <p>The stub's reason for existing in commit 1 is
- * to prove the OpenAPI contract → Java interface
- * generation pipeline works. The Spring
- * application context is only buildable end-to-end
- * if the {@code BillingApi} interface is
- * implemented — the {@code apiNameSuffix=Api}
- * setting in pom.xml + the {@code interfaceOnly=true}
- * mode produce a pure interface; a missing
- * implementation would silently fail bean wiring
- * at startup.</p>
+ * <p>Auth: the auth-lib {@link CurrentUser} is a static
+ * utility; we call it directly (no constructor
+ * injection). The JWT filter populated by
+ * auth-lib's {@code AuthLibSecurityConfig} sets the
+ * thread-local on every authenticated request.</p>
  */
 @RestController
 @Slf4j
 public class BillingController implements BillingApi {
 
+    private final CheckoutService checkoutService;
+
+    public BillingController(CheckoutService checkoutService) {
+        this.checkoutService = checkoutService;
+    }
+
     @Override
     public ResponseEntity<CheckoutResponse> createCheckout(CheckoutRequest checkoutRequest) {
-        log.warn(
-            "createCheckout called for plan={}, provider={} but not yet implemented (commit 1 stub)",
-            checkoutRequest != null ? checkoutRequest.getPlanId() : null,
-            checkoutRequest != null ? checkoutRequest.getProvider() : null
-        );
-        // 501 with a stub URL. The frontend treats
-        // 501 as "endpoint not yet available" and
-        // surfaces a friendly "coming soon" message.
-        // The OpenAPI generator emits a separate
-        // `ProviderEnum` for each schema (Request vs
-        // Response) even when the values are
-        // identical, so we map them explicitly here.
-        CheckoutResponse response = new CheckoutResponse()
-            .paymentId(null)
-            .checkoutUrl(URI.create("https://example.com/stub-not-implemented"));
-        if (checkoutRequest != null && checkoutRequest.getProvider() != null) {
-            response.setProvider(
-                CheckoutResponse.ProviderEnum.valueOf(checkoutRequest.getProvider().name())
-            );
+        final String userIdString = CurrentUser.getUserId();
+        if (userIdString == null) {
+            // No JWT in the request — should have been
+            // rejected by the security filter (Commit 6
+            // wires the security config). For the
+            // open endpoints (Commit 1 stub) we return
+            // 401 explicitly so the contract is honored.
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
-        return ResponseEntity
-            .status(HttpStatus.NOT_IMPLEMENTED)
-            .body(response);
+        final UUID userId = UUID.fromString(userIdString);
+        final PaymentProvider provider = mapProvider(checkoutRequest.getProvider());
+
+        if (provider == PaymentProvider.STRIPE) {
+            // Commit 4 — return 501 until Stripe is wired in.
+            return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED).build();
+        }
+
+        final CheckoutResult result = checkoutService.checkout(
+            userId, checkoutRequest.getPlanId(), provider
+        );
+        final CheckoutResponse response = new CheckoutResponse()
+            .paymentId(result.paymentId())
+            .checkoutUrl(result.checkoutUrl())
+            .provider(mapToResponseProvider(result.provider()));
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
+    private static PaymentProvider mapProvider(
+        CheckoutRequest.ProviderEnum requestProvider
+    ) {
+        if (requestProvider == null) {
+            throw new IllegalArgumentException("provider is required");
+        }
+        return switch (requestProvider) {
+            case LIQPAY -> PaymentProvider.LIQPAY;
+            case STRIPE -> PaymentProvider.STRIPE;
+        };
+    }
+
+    private static CheckoutResponse.ProviderEnum mapToResponseProvider(
+        PaymentProvider provider
+    ) {
+        return switch (provider) {
+            case LIQPAY -> CheckoutResponse.ProviderEnum.LIQPAY;
+            case STRIPE -> CheckoutResponse.ProviderEnum.STRIPE;
+        };
     }
 }
