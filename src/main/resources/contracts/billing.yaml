@@ -1,0 +1,262 @@
+openapi: 3.0.3
+info:
+  title: Billing Service API
+  description: |
+    REST API для обробки платежів по підписках через
+    LiqPay (UA) та Stripe (EU/US). Єдине джерело
+    правди для таблиць SUBSCRIPTION_PAYMENTS,
+    BILLING_INVOICES, BILLING_WEBHOOK_EVENTS.
+
+    Phase 4.3 of DEVELOPMENT_ROADMAP.md.
+  version: 1.0.0
+servers:
+  - url: /rest/ua.fin.api/billing
+    description: Local development server
+
+# Note on auth: 3 of 4 endpoints require JWT
+# (`bearerAuth` below). The two webhook endpoints
+# are permitAll — they verify HMAC signatures on
+# the raw request body instead of JWTs. The
+# SecurityConfig in BillingApplication enforces
+# this; the swagger UI uses the same scheme.
+security:
+  - bearerAuth: []
+
+paths:
+  # ----------------------------------------------------------------
+  # Checkout — initiates a payment with the chosen provider.
+  # Returns a URL the user should be redirected to
+  # (LiqPay hosted page or Stripe Checkout Session).
+  # ----------------------------------------------------------------
+  /rest/ua.fin.api/billing/checkout:
+    post:
+      summary: Create a checkout session for a subscription plan
+      description: |
+        Resolves the plan price, creates a `Payment` row
+        with status `PENDING`, then calls the chosen
+        provider (LiqPay or Stripe) to mint a hosted
+        checkout URL. Returns 201 with the URL.
+
+        The user is redirected to the URL, pays, and the
+        provider POSTs the result to the matching
+        `/webhooks/{provider}` endpoint. The webhook
+        handler updates the `Payment` to `SUCCEEDED`
+        (or `FAILED`) and, on success, extends the
+        user's `SUBSCRIPTIONS.END_DATE` via
+        subscription-service.
+      operationId: createCheckout
+      tags: [Billing]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CheckoutRequest'
+      responses:
+        '201':
+          description: Checkout session created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckoutResponse'
+        '400':
+          description: Invalid request (unknown plan / provider)
+        '401':
+          description: Unauthorized (no JWT or invalid JWT)
+        '404':
+          description: Plan not found
+
+  # ----------------------------------------------------------------
+  # LiqPay webhook — un-authenticated. Signature-verified.
+  # ----------------------------------------------------------------
+  /rest/ua.fin.api/billing/webhooks/liqpay:
+    post:
+      summary: LiqPay payment callback
+      description: |
+        LiqPay POSTs `data` (base64-encoded JSON) and
+        `signature` (base64-encoded SHA-1 of
+        `private_key + data + private_key`). The
+        controller recomputes the signature, rejects
+        on mismatch (400), inserts into
+        `BILLING_WEBHOOK_EVENTS` (PK dedup) and
+        updates the `Payment` row on success.
+      operationId: liqpayWebhook
+      tags: [Webhooks]
+      # NO bearerAuth — LiqPay doesn't have JWTs.
+      # Signature verification is the auth.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [data, signature]
+              properties:
+                data:
+                  type: string
+                  description: Base64-encoded JSON payload
+                signature:
+                  type: string
+                  description: Base64-encoded SHA-1 signature
+      responses:
+        '200':
+          description: Webhook accepted (also on duplicate)
+        '400':
+          description: Signature verification failed
+        '500':
+          description: Internal error (LiqPay will retry)
+
+  # ----------------------------------------------------------------
+  # Stripe webhook — un-authenticated. Stripe-Signature-verified.
+  # ----------------------------------------------------------------
+  /rest/ua.fin.api/billing/webhooks/stripe:
+    post:
+      summary: Stripe payment callback
+      description: |
+        Stripe POSTs the raw event JSON with a
+        `Stripe-Signature` header. The controller reads
+        the raw body (NOT the parsed @RequestBody —
+        Jackson mangles whitespace and breaks the HMAC),
+        then calls `Webhook.constructEvent(...)` to
+        verify the signature against the configured
+        webhook secret.
+      operationId: stripeWebhook
+      tags: [Webhooks]
+      security: []
+      parameters:
+        - name: Stripe-Signature
+          in: header
+          required: true
+          schema:
+            type: string
+          description: |
+            Stripe-generated HMAC-SHA256 signature of
+            the raw body, with timestamp prefix
+            (`t=...,v1=...`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Webhook accepted (also on duplicate)
+        '400':
+          description: Signature verification failed
+
+  # ----------------------------------------------------------------
+  # Invoice PDF download — JWT-authenticated, returns
+  # `application/pdf` binary.
+  # ----------------------------------------------------------------
+  /rest/ua.fin.api/billing/invoices/{paymentId}/pdf:
+    get:
+      summary: Download the PDF invoice for a payment
+      description: |
+        Returns the generated invoice PDF (binary
+        `application/pdf`). 403 if the requester's
+        user_id does not match the payment's
+        `user_id`. 404 if the invoice hasn't been
+        generated yet (e.g. the webhook hasn't
+        completed).
+      operationId: downloadInvoicePdf
+      tags: [Invoices]
+      parameters:
+        - name: paymentId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: PDF file
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden (not the payment's user)
+        '404':
+          description: Invoice not found
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    # ----------------------------------------------------------------
+    # CheckoutRequest — what the mobile app POSTs.
+    # ----------------------------------------------------------------
+    CheckoutRequest:
+      type: object
+      required: [planId, provider]
+      properties:
+        planId:
+          type: string
+          format: uuid
+          description: |
+            `SUBSCRIPTION_PLANS.PLAN_ID` from
+            subscription-service. Validated against
+            a service-to-service GET.
+        provider:
+          type: string
+          enum: [LIQPAY, STRIPE]
+          description: |
+            Payment provider. LiqPay for UA, Stripe
+            for EU/US.
+        promoCode:
+          type: string
+          nullable: true
+          description: |
+            Optional promo code — validated against
+            `PROMO_CODES` in subscription-service.
+            Phase 4.3 accepts the field but doesn't
+            apply the discount (deferred to Phase 5+);
+            the discount is already covered by
+            `subscription-service.applyPromoCode`.
+
+    # ----------------------------------------------------------------
+    # CheckoutResponse — what the mobile app receives.
+    # ----------------------------------------------------------------
+    CheckoutResponse:
+      type: object
+      required: [paymentId, checkoutUrl, provider]
+      properties:
+        paymentId:
+          type: string
+          format: uuid
+          description: |
+            `SUBSCRIPTION_PAYMENTS.PAYMENT_ID` of the
+            newly created row (status=PENDING). The
+            mobile app can poll
+            `GET /payments/{id}` (Phase 5+) to check
+            the outcome, or rely on the FCM push
+            (4.9c) for the success notification.
+        checkoutUrl:
+          type: string
+          format: uri
+          description: |
+            Hosted checkout URL. LiqPay returns
+            `https://www.liqpay.ua/api/3/checkout/...`;
+            Stripe returns the Checkout Session URL.
+        provider:
+          type: string
+          enum: [LIQPAY, STRIPE]
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            When the checkout URL expires. LiqPay
+            defaults to 24h; Stripe Checkout Session
+            defaults to 24h. The mobile app should
+            open the URL before this time.

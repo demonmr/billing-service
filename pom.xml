@@ -1,0 +1,288 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>4.1.0</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>ua.fin</groupId>
+    <artifactId>billing-service</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+    <name>billing-service</name>
+    <description>Billing microservice: LiqPay + Stripe + PDF invoices + auto-renewal. Phase 4.3 of DEVELOPMENT_ROADMAP.md.</description>
+
+    <properties>
+        <java.version>25</java.version>
+        <lombok.version>1.18.46</lombok.version>
+        <auth.lib.version>1.0.3</auth.lib.version>
+        <!-- Spring Cloud BOM — required for the
+             eureka-client dependency. Mirrors the
+             version used by api-gateway-service
+             (2025.0.0 is the version compatible with
+             Spring Boot 4.1.0). -->
+        <spring-cloud.version>2025.0.0</spring-cloud.version>
+        <!-- Phase 4.3 — pinned for now. Major version
+             upgrades are a Phase 5+ concern. -->
+        <stripe-java.version>32.0.0</stripe-java.version>
+        <openpdf.version>2.0.2</openpdf.version>
+        <!-- ShedLock — distributed lock for the
+             auto-renewal scheduler. Prevents double
+             firing when billing-service is scaled to
+             N pods. -->
+        <shedlock.version>5.16.0</shedlock.version>
+    </properties>
+
+    <dependencies>
+        <!-- Core Spring Boot starters — mirror
+             subscription-service. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-autoconfigure</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
+        <!-- Eureka client — registers as
+             BILLING-SERVICE. Same as every other
+             service in the meta-repo. -->
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
+        </dependency>
+
+        <!-- auth-lib: JWT validation + CurrentUser.
+             Required by SubscriptionController, LiqPay
+             checkout, invoice download. -->
+        <dependency>
+            <groupId>ua.fin.secure</groupId>
+            <artifactId>auth-lib</artifactId>
+            <version>${auth.lib.version}</version>
+        </dependency>
+
+        <!-- Phase 4.3 — Stripe Java SDK. Brings
+             OkHttp + Gson as transitive deps; no
+             version conflict expected (subscription-service
+             does not use either). -->
+        <dependency>
+            <groupId>com.stripe</groupId>
+            <artifactId>stripe-java</artifactId>
+            <version>${stripe-java.version}</version>
+        </dependency>
+
+        <!-- Phase 4.3 — OpenPDF for invoice generation.
+             LGPL + MPL — free for commercial SaaS
+             (unlike iText 7+ AGPL). -->
+        <dependency>
+            <groupId>com.github.librepdf</groupId>
+            <artifactId>openpdf</artifactId>
+            <version>${openpdf.version}</version>
+        </dependency>
+
+        <!-- Phase 4.3 — ShedLock for the auto-renewal
+             scheduler. JDBC lock provider — uses the
+             same MSSQL DB as the rest of the service.
+             The shedlock table is auto-created on
+             startup by the provider; we configure the
+             table name in application.yml. -->
+        <dependency>
+            <groupId>net.javacrumbs.shedlock</groupId>
+            <artifactId>shedlock-spring</artifactId>
+            <version>${shedlock.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>net.javacrumbs.shedlock</groupId>
+            <artifactId>shedlock-provider-jdbc-template</artifactId>
+            <version>${shedlock.version}</version>
+        </dependency>
+
+        <!-- Database drivers — MSSQL for prod, H2 for
+             tests + local dev. -->
+        <dependency>
+            <groupId>com.microsoft.sqlserver</groupId>
+            <artifactId>mssql-jdbc</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- OpenAPI generated nullable support. -->
+        <dependency>
+            <groupId>org.openapitools</groupId>
+            <artifactId>jackson-databind-nullable</artifactId>
+            <version>0.2.6</version>
+        </dependency>
+
+        <!-- Lombok -->
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <version>${lombok.version}</version>
+        </dependency>
+
+        <!-- OpenAPI / Swagger UI -->
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+            <version>3.0.3</version>
+        </dependency>
+
+        <!-- Test -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Spring Boot 4.x moved @WebMvcTest to a
+             dedicated `spring-boot-webmvc-test`
+             artifact (was previously in
+             `spring-boot-test-autoconfigure`). The
+             package path also changed from
+             `org.springframework.boot.test.autoconfigure.web.servlet`
+             to `org.springframework.boot.webmvc.test.autoconfigure`.
+             Without this dep, the BillingControllerStubTest
+             fails to compile in Commit 1. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-webmvc-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>repackage</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <release>25</release>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                            <version>${lombok.version}</version>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>build-helper-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>add-source</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>add-source</goal>
+                        </goals>
+                        <configuration>
+                            <sources>
+                                <source>${project.build.directory}/generated-sources/billing-service/src/main/java</source>
+                            </sources>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.openapitools</groupId>
+                <artifactId>openapi-generator-maven-plugin</artifactId>
+                <version>7.23.0</version>
+                <executions>
+                    <execution>
+                        <id>generate-java-server</id>
+                        <goals>
+                            <goal>generate</goal>
+                        </goals>
+                        <configuration>
+                            <inputSpec>src/main/resources/contracts/billing.yaml</inputSpec>
+                            <generatorName>spring</generatorName>
+                            <output>${project.build.directory}/generated-sources/billing-service</output>
+                            <apiPackage>ua.fin.billing.api</apiPackage>
+                            <modelPackage>ua.fin.billing.model</modelPackage>
+                            <invokerPackage>ua.fin.billing.base</invokerPackage>
+                            <configOptions>
+                                <languageOption>${java.version}</languageOption>
+                                <useRuntimeVersion>${java.version}</useRuntimeVersion>
+                                <useJakartaEe>true</useJakartaEe>
+                                <apiNameSuffix>Api</apiNameSuffix>
+                                <interfaceOnly>true</interfaceOnly>
+                                <useTags>true</useTags>
+                                <useSpringBoot3>true</useSpringBoot3>
+                            </configOptions>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
+    <dependencyManagement>
+        <dependencies>
+            <!-- Spring Cloud BOM — versions of all
+                 spring-cloud artifacts (Eureka client,
+                 gateway, circuit breaker, etc.) are
+                 managed here. Without it, Maven can't
+                 resolve the eureka-client version
+                 since Spring Cloud uses a BOM
+                 instead of pinning each artifact. -->
+            <dependency>
+                <groupId>org.springframework.cloud</groupId>
+                <artifactId>spring-cloud-dependencies</artifactId>
+                <version>${spring-cloud.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <repositories>
+        <repository>
+            <id>github</id>
+            <url>https://maven.pkg.github.com/demonmr/fin_analitycs_app</url>
+            <snapshots>
+                <enabled>true</enabled>
+            </snapshots>
+        </repository>
+    </repositories>
+</project>

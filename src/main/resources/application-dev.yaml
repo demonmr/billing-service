@@ -1,0 +1,66 @@
+spring:
+  datasource:
+    # Dev profile — H2 in-memory. Phase 4.3 dev uses
+    # the same in-memory DB approach as other services
+    # for unit-test-style local runs. The V23
+    # migration runs against H2 in this profile (the
+    # SQL Server `IF NOT EXISTS` / `sys.objects`
+    # guards translate to H2's INFORMATION_SCHEMA
+    # checks — see V23's port comment for the
+    # delta).
+    url: jdbc:h2:mem:billing_dev;DB_CLOSE_DELAY=-1;MODE=MSSQLServer
+    username: sa
+    password: ""
+    driver-class-name: org.h2.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+
+server:
+  port: 8089
+
+# Eureka is disabled in dev (matches every other
+# service in the meta-repo — discovery only matters
+# in docker-compose).
+eureka:
+  client:
+    enabled: false
+
+# Same dev signing key as auth-service's test
+# profile. JWTs minted by the dev auth-service
+# validate against this.
+auth:
+  lib:
+    enabled: true
+    signing-key: dGhpcy1pcy1hLWZha2Utc2lnbmluZy1rZXktdGhhdC1pcy1iYXNlNjQtZW5jb2RlZA==
+
+# Dev LiqPay + Stripe keys (sandbox). The
+# BillingProperties loads these from yml only when
+# the env vars are missing; in production the env
+# vars always take precedence.
+billing:
+  liqpay:
+    public-key: sandbox_public_key
+    private-key: sandbox_private_key
+    sandbox: true
+  stripe:
+    api-key: sk_test_dev_placeholder
+    webhook-secret: whsec_dev_placeholder
+    api-version: 2025-04-30.basil
+  subscription-service:
+    base-url: http://localhost:8083
+    internal-token: dev-internal-token
+  scheduler:
+    # 30 seconds — useful when the dev wants to
+    # see auto-renewal fire quickly. Override via
+    # the BILLING_AUTO_RENEWAL_CRON env var.
+    auto-renewal-cron: "*/30 * * * * *"
+
+logging:
+  level:
+    org.springframework: DEBUG
+    ua.fin.billing: DEBUG

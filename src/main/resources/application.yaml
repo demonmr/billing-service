@@ -1,0 +1,111 @@
+spring:
+  application:
+    name: billing-service
+  datasource:
+    # Phase 4.3 — production uses the shared MSSQL
+    # instance. The URL is supplied at runtime via the
+    # DB_URL env var (matches every other service in
+    # the meta-repo).
+    url: ${DB_URL}
+    username: ${DB_USER_NAME}
+    password: ${DB_PASSWORD}
+  jpa:
+    hibernate:
+      # Phase 4.3 — strict validate. V23 (which creates
+      # SUBSCRIPTION_PAYMENTS, BILLING_INVOICES,
+      # BILLING_WEBHOOK_EVENTS) MUST run before this
+      # service is started. The docker-compose ordering
+      # has db-migration as a depends_on for every
+      # service, so this is the natural safeguard.
+      ddl-auto: validate
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+    database-platform: org.hibernate.dialect.SQLServerDialect
+  web:
+    error:
+      include-message: always
+
+server:
+  port: 8089
+
+# Signing key for JWT validation — must match
+# auth-service's signing key. The placeholder is
+# the same dev key as the other services.
+auth:
+  lib:
+    enabled: true
+    signing-key: ${AUTH_SIGNING_KEY:dGhpcy1pcy1hLWZha2Utc2lnbmluZy1rZXktdGhhdC1pcy1iYXNlNjQtZW5jb2RlZA==}
+
+# Phase 4.3 — billing-specific properties. All
+# secrets must come from env vars in production; the
+# yml has placeholder defaults for local dev only.
+billing:
+  liqpay:
+    # LiqPay public key (merchant's public identifier,
+    # safe to log). Set via BILLING_LIQPAY_PUBLIC_KEY.
+    public-key: ${BILLING_LIQPAY_PUBLIC_KEY:sandbox_public_key}
+    # LiqPay private key — secret. NEVER log this.
+    private-key: ${BILLING_LIQPAY_PRIVATE_KEY:sandbox_private_key}
+    # LiqPay's API is a single endpoint for both prod
+    # and sandbox; the toggle is the `sandbox` field
+    # in the request body. BillingProperties forwards
+    # this flag to every checkout request.
+    sandbox: ${BILLING_LIQPAY_SANDBOX:true}
+  stripe:
+    # Stripe secret API key (sk_test_... or sk_live_...).
+    api-key: ${BILLING_STRIPE_API_KEY:sk_test_placeholder}
+    # Webhook signing secret (whsec_...). Each Stripe
+    # webhook endpoint has its own secret. Set via
+    # BILLING_STRIPE_WEBHOOK_SECRET.
+    webhook-secret: ${BILLING_STRIPE_WEBHOOK_SECRET:whsec_placeholder}
+    # API version — pin to 2025-04-30.basil (the
+    # version at the time Phase 4.3 ships). Phase 5+
+    # may upgrade.
+    api-version: ${BILLING_STRIPE_API_VERSION:2025-04-30.basil}
+  subscription-service:
+    # Service-to-service call target (after 3 dunning
+    # failures we POST to subscription-service to flip
+    # IS_ACTIVE=false on the parent subscription).
+    base-url: ${BILLING_SUBSCRIPTION_SERVICE_URL:http://subscription-service:8083}
+    # Internal token — mirrors person-setting-service's
+    # internal-token pattern. The auth-service validates
+    # X-Internal-Token == AUTH_INTERNAL_TOKEN on
+    # service-to-service calls.
+    internal-token: ${BILLING_SUBSCRIPTION_SERVICE_INTERNAL_TOKEN:dev-internal-token}
+  scheduler:
+    # Daily 03:00 — auto-renewal. Configurable for
+    # local testing (e.g. "*/30 * * * * *" = every
+    # 30s).
+    auto-renewal-cron: ${BILLING_AUTO_RENEWAL_CRON:0 0 3 * * *}
+
+# Phase 4.3 — ShedLock JDBC provider. The lock
+# table is auto-created by shedlock-spring on
+# startup; we keep the default name `shedlock` to
+# match the provider convention.
+shedlock:
+  providers:
+    jdbc:
+      table-name: shedlock
+  default-lock-at-most-for: PT1H
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when_authorized
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+logging:
+  level:
+    root: INFO
+    ua.fin.billing: DEBUG
