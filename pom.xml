@@ -20,7 +20,7 @@
     <properties>
         <java.version>25</java.version>
         <lombok.version>1.18.46</lombok.version>
-        <auth.lib.version>1.0.3</auth.lib.version>
+        <auth.lib.version>4.0.0-SNAPSHOT</auth.lib.version>
         <!-- Spring Cloud BOM — required for the
              eureka-client dependency. Mirrors the
              version used by api-gateway-service

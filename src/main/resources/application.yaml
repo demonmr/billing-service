@@ -30,19 +30,10 @@ spring:
 server:
   port: 8089
 
-# Signing key for JWT validation — must match
-# auth-service's signing key. The placeholder is
-# the same dev key as the other services.
+# Auth-Lib конфігурація
+# Phase D (v4.0.0): the local-verify path (auth.lib.signing-key)
+# was removed. auth-service is now the only verifier.
 auth:
-  lib:
-    enabled: true
-    # Phase C (v3.0.0): signing-key still present — it
-    # is the fail-open fallback when auth-service is
-    # unreachable. Removed in Phase D.
-    signing-key: ${AUTH_SIGNING_KEY:dGhpcy1pcy1hLWZha2Utc2lnbmluZy1rZXktdGhhdC1pcy1iYXNlNjQtZW5jb2RlZA==}
-  # Phase C (v3.0.0): opt in to auth-service JWT
-  # introspection. Tokens revoked at auth-service
-  # become effective here within cache-ttl-seconds.
   secure:
     url: "http://auth-service:8000"
     internal-token: ${AUTH_INTERNAL_TOKEN:dev-internal-token-change-in-prod}
