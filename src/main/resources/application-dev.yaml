@@ -36,7 +36,19 @@ eureka:
 auth:
   lib:
     enabled: true
+    # Phase C (v3.0.0): signing-key still present — it
+    # is the fail-open fallback when auth-service is
+    # unreachable. Removed in Phase D.
     signing-key: dGhpcy1pcy1hLWZha2Utc2lnbmluZy1rZXktdGhhdC1pcy1iYXNlNjQtZW5jb2RlZA==
+  # Phase C (v3.0.0): opt in to auth-service JWT
+  # introspection. Dev profile points at the local
+  # auth-service instance.
+  secure:
+    url: "http://auth-service:8000"
+    internal-token: dev-internal-token-change-in-prod
+    introspection-enabled: true
+    introspection-fail-open: true
+    cache-ttl-seconds: 60
 
 # Dev LiqPay + Stripe keys (sandbox). The
 # BillingProperties loads these from yml only when
