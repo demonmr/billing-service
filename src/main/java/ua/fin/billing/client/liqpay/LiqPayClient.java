@@ -1,7 +1,10 @@
 package ua.fin.billing.client.liqpay;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
@@ -31,62 +34,23 @@ import java.util.Base64;
  * encoding is mandatory — sending raw JSON in {@code data}
  * will result in a {@code 400 Bad signature} from LiqPay.</p>
  */
-@Component
 @Slf4j
+@Component
+@RequiredArgsConstructor
 public class LiqPayClient {
 
     /** LiqPay's single hosted-checkout endpoint (prod + sandbox). */
     public static final String LIQPAY_CHECKOUT_URL =
-        "https://www.liqpay.ua/api/3/checkout";
-
+        "/api/3/checkout";
+    @Qualifier("liquiPayClient")
     private final RestClient restClient;
-    private final ObjectMapper objectMapper;
+    @Value("${billing.liqpay.public-key}")
+    private String liquiPayPrivateKey;
+    private final ObjectMapper objectMapper = new ObjectMapper();
     private final LiqPaySignatureService signatureService;
-    private final BillingProperties.LiqPay liqPayProperties;
 
-    public LiqPayClient(
-        RestClient.Builder builder,
-        ObjectMapper objectMapper,
-        LiqPaySignatureService signatureService,
-        BillingProperties properties
-    ) {
-        // Always build with the LiqPay prod endpoint as
-        // the baseUrl. The {@code RestClient.Builder} the
-        // caller passes may have set other defaults
-        // (interceptors, messageConverters) but the URL
-        // is hardcoded to LiqPay — there's only one
-        // endpoint, and rewriting it for tests would
-        // require either env-var indirection or a
-        // dedicated test profile. The
-        // {@code LiqPayClientTest} uses a separate
-        // constructor that takes a fully-built
-        // {@code RestClient} (pointed at a
-        // MockWebServer) instead of this one.
-        this.restClient = builder
-            .baseUrl(LIQPAY_CHECKOUT_URL)
-            .build();
-        this.objectMapper = objectMapper;
-        this.signatureService = signatureService;
-        this.liqPayProperties = properties.liqpay();
-    }
 
-    /**
-     * Test-only constructor — takes an already-built
-     * {@code RestClient} so the caller can point at a
-     * MockWebServer. Production code uses the
-     * builder-based constructor above.
-     */
-    LiqPayClient(
-        RestClient restClient,
-        ObjectMapper objectMapper,
-        LiqPaySignatureService signatureService,
-        BillingProperties properties
-    ) {
-        this.restClient = restClient;
-        this.objectMapper = objectMapper;
-        this.signatureService = signatureService;
-        this.liqPayProperties = properties.liqpay();
-    }
+
 
     /**
      * Mint a hosted-checkout URL for a {@code pay} action.
@@ -107,7 +71,7 @@ public class LiqPayClient {
         final String base64Data = Base64.getEncoder()
             .encodeToString(json.getBytes(StandardCharsets.UTF_8));
         final String signature = signatureService.sign(
-            liqPayProperties.privateKey(), base64Data
+                liquiPayPrivateKey, base64Data
         );
 
         // The "response" from the checkout endpoint is the
@@ -153,7 +117,7 @@ public class LiqPayClient {
         String base64Data, String base64Signature
     ) {
         if (!signatureService.verify(
-            liqPayProperties.privateKey(), base64Data, base64Signature
+                liquiPayPrivateKey, base64Data, base64Signature
         )) {
             throw new LiqPaySignatureException(
                 "LiqPay webhook signature verification failed"

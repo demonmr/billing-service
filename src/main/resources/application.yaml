@@ -29,15 +29,24 @@ spring:
 
 server:
   port: 8089
-
-# Signing key for JWT validation — must match
-# auth-service's signing key. The placeholder is
-# the same dev key as the other services.
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_URL:http://eureka-admin:change-me-in-production@localhost:8761/eureka/}
+    register-with-eureka: true
+    fetch-registry: true
+  instance:
+    prefer-ip-address: true
+    instance-id: ${spring.application.name}:${random.value}
 auth:
-  lib:
-    enabled: true
-    signing-key: ${AUTH_SIGNING_KEY:dGhpcy1pcy1hLWZha2Utc2lnbmluZy1rZXktdGhhdC1pcy1iYXNlNjQtZW5jb2RlZA==}
-
+  secure:
+    url: ${GATEWAY_URL:http://192.168.5.5:8080}
+    internal-token: ${AUTH_INTERNAL_TOKEN:dev-internal-token-change-in-prod}
+    introspection-enabled: true
+    introspection-fail-open: true
+    cache-ttl-seconds: 60
+gateway:
+  url: ${GATEWAY_URL:http://192.168.5.5:8080}
 # Phase 4.3 — billing-specific properties. All
 # secrets must come from env vars in production; the
 # yml has placeholder defaults for local dev only.
@@ -64,16 +73,6 @@ billing:
     # version at the time Phase 4.3 ships). Phase 5+
     # may upgrade.
     api-version: ${BILLING_STRIPE_API_VERSION:2025-04-30.basil}
-  subscription-service:
-    # Service-to-service call target (after 3 dunning
-    # failures we POST to subscription-service to flip
-    # IS_ACTIVE=false on the parent subscription).
-    base-url: ${BILLING_SUBSCRIPTION_SERVICE_URL:http://subscription-service:8083}
-    # Internal token — mirrors person-setting-service's
-    # internal-token pattern. The auth-service validates
-    # X-Internal-Token == AUTH_INTERNAL_TOKEN on
-    # service-to-service calls.
-    internal-token: ${BILLING_SUBSCRIPTION_SERVICE_INTERNAL_TOKEN:dev-internal-token}
   scheduler:
     # Daily 03:00 — auto-renewal. Configurable for
     # local testing (e.g. "*/30 * * * * *" = every

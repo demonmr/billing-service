@@ -5,6 +5,7 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 import org.springframework.boot.persistence.autoconfigure.EntityScan;
+import org.springframework.cloud.client.discovery.EnableDiscoveryClient;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
@@ -38,6 +39,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @EntityScan("ua.fin.billing.entity")
 @ConfigurationPropertiesScan("ua.fin.billing.config")
 @EnableScheduling
+@EnableDiscoveryClient
 @EnableSchedulerLock(defaultLockAtMostFor = "PT1H")
 public class BillingApplication {
 

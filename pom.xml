@@ -20,25 +20,22 @@
     <properties>
         <java.version>25</java.version>
         <lombok.version>1.18.46</lombok.version>
-        <auth.lib.version>1.0.3</auth.lib.version>
-        <!-- Spring Cloud BOM — required for the
-             eureka-client dependency. Mirrors the
-             version used by api-gateway-service
-             (2025.0.0 is the version compatible with
-             Spring Boot 4.1.0). -->
-        <spring-cloud.version>2025.0.0</spring-cloud.version>
-        <!-- Phase 4.3 — pinned for now. Major version
-             upgrades are a Phase 5+ concern. -->
+        <auth.lib.version>4.0.0-SNAPSHOT</auth.lib.version>
         <stripe-java.version>32.0.0</stripe-java.version>
         <openpdf.version>2.0.2</openpdf.version>
-        <!-- ShedLock — distributed lock for the
-             auto-renewal scheduler. Prevents double
-             firing when billing-service is scaled to
-             N pods. -->
         <shedlock.version>5.16.0</shedlock.version>
     </properties>
 
     <dependencies>
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
+            <version>5.0.2</version>
+        </dependency>
+        <dependency>
+            <groupId>com.github.ben-manes.caffeine</groupId>
+            <artifactId>caffeine</artifactId>
+        </dependency>
         <!-- Core Spring Boot starters — mirror
              subscription-service. -->
         <dependency>
@@ -69,15 +66,6 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
-
-        <!-- Eureka client — registers as
-             BILLING-SERVICE. Same as every other
-             service in the meta-repo. -->
-        <dependency>
-            <groupId>org.springframework.cloud</groupId>
-            <artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
-        </dependency>
-
         <!-- auth-lib: JWT validation + CurrentUser.
              Required by SubscriptionController, LiqPay
              checkout, invoice download. -->
@@ -156,7 +144,6 @@
             <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
             <version>3.0.3</version>
         </dependency>
-
         <!-- Test -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -264,29 +251,31 @@
                             </configOptions>
                         </configuration>
                     </execution>
+                    <execution>
+                        <id>generate-subscription-client-java-server</id>
+                        <goals>
+                            <goal>generate</goal>
+                        </goals>
+                        <configuration>
+                            <inputSpec>src/main/resources/contracts/subscription.yaml</inputSpec>
+                            <generatorName>java</generatorName>
+                            <library>restclient</library>
+                            <apiPackage>ua.fin.billing.subscription.client.api</apiPackage>
+                            <modelPackage>ua.fin.billing.subscription.client.model</modelPackage>
+                            <configOptions>
+                                <useTags>true</useTags>
+                                <useSpringBoot4>true</useSpringBoot4>
+                                <useJackson3>true</useJackson3>
+                                <openApiNullable>false</openApiNullable>
+                                <apiTests>false</apiTests>
+                                <modelTests>false</modelTests>
+                            </configOptions>
+                        </configuration>
+                    </execution>
                 </executions>
             </plugin>
         </plugins>
     </build>
-
-    <dependencyManagement>
-        <dependencies>
-            <!-- Spring Cloud BOM — versions of all
-                 spring-cloud artifacts (Eureka client,
-                 gateway, circuit breaker, etc.) are
-                 managed here. Without it, Maven can't
-                 resolve the eureka-client version
-                 since Spring Cloud uses a BOM
-                 instead of pinning each artifact. -->
-            <dependency>
-                <groupId>org.springframework.cloud</groupId>
-                <artifactId>spring-cloud-dependencies</artifactId>
-                <version>${spring-cloud.version}</version>
-                <type>pom</type>
-                <scope>import</scope>
-            </dependency>
-        </dependencies>
-    </dependencyManagement>
 
     <repositories>
         <repository>

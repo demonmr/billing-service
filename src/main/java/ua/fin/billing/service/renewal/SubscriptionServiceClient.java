@@ -1,10 +1,9 @@
 package ua.fin.billing.service.renewal;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.RestClient;
-import ua.fin.billing.config.BillingProperties;
+import ua.fin.billing.subscription.client.api.SubscriptionsApi;
 
 import java.util.UUID;
 
@@ -26,23 +25,12 @@ import java.util.UUID;
  * client is wired to fail loudly on a 404 so
  * the dunning is observable in logs.</p>
  */
-@Component
 @Slf4j
+@Component
+@RequiredArgsConstructor
 public class SubscriptionServiceClient {
 
-    private final RestClient restClient;
-    private final BillingProperties.SubscriptionService properties;
-
-    public SubscriptionServiceClient(BillingProperties billingProperties) {
-        this.properties = billingProperties.subscriptionService();
-        this.restClient = RestClient.builder()
-            .baseUrl(properties.baseUrl())
-            .defaultHeader(
-                HttpHeaders.CONTENT_TYPE,
-                "application/json"
-            )
-            .build();
-    }
+    private final SubscriptionsApi subscriptionsApi;
 
     /**
      * Call subscription-service to flip
@@ -60,27 +48,6 @@ public class SubscriptionServiceClient {
             "subscription-service: deactivating subscriptionId={}, reason='{}'",
             subscriptionId, reason
         );
-        try {
-            restClient.post()
-                .uri("/rest/ua.fin.api/subscriptions/internal/{id}/deactivate",
-                    subscriptionId)
-                .header("X-Internal-Token", properties.internalToken())
-                .body(java.util.Map.of("reason", reason))
-                .retrieve()
-                .toBodilessEntity();
-        } catch (org.springframework.web.client.HttpClientErrorException
-                     | org.springframework.web.client.HttpServerErrorException e) {
-            // 4xx / 5xx — log and propagate so
-            // the caller (AutoRenewalService) can
-            // decide whether to retry.
-            log.error(
-                "subscription-service: deactivation failed: status={}, body={}",
-                e.getStatusCode(), e.getResponseBodyAsString()
-            );
-            throw new RuntimeException(
-                "subscription-service deactivation failed: "
-                    + e.getStatusCode(), e
-            );
-        }
+
     }
 }
