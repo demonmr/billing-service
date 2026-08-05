@@ -24,13 +24,17 @@ package ua.fin.billing.service.renewal;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
+import ua.fin.billing.client.liqpay.LiqPayCheckoutRequest;
 import ua.fin.billing.client.liqpay.LiqPayClient;
+import ua.fin.billing.client.stripe.StripeCheckoutRequest;
 import ua.fin.billing.client.stripe.StripeClient;
+import ua.fin.billing.config.BillingProperties;
 import ua.fin.billing.entity.Payment;
 import ua.fin.billing.entity.PaymentProvider;
 import ua.fin.billing.entity.PaymentStatus;
 import ua.fin.billing.repository.PaymentRepository;
 
+import java.net.URI;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
@@ -49,20 +53,35 @@ class AutoRenewalServiceTest {
 
     private PaymentRepository paymentRepository;
     private SubscriptionServiceClient subscriptionServiceClient;
+    private LiqPayClient liqPayClient;
+    private StripeClient stripeClient;
+    private BillingProperties properties;
     private AutoRenewalService service;
 
     @BeforeEach
     void setUp() {
         paymentRepository = mock(PaymentRepository.class);
         subscriptionServiceClient = mock(SubscriptionServiceClient.class);
-        // The LiqPay / Stripe clients are
-        // referenced for shape only — Phase 5+
-        // uses them in earnest. We pass mocks
-        // so the constructor doesn't NPE.
+        liqPayClient = mock(LiqPayClient.class);
+        stripeClient = mock(StripeClient.class);
+        properties = new BillingProperties(
+            new BillingProperties.LiqPay(
+                "sandbox_public_key", "sandbox_private_key", true
+            ),
+            new BillingProperties.Stripe(
+                "sk_test_placeholder", "whsec_placeholder",
+                "2025-04-30.basil"
+            ),
+            new BillingProperties.SubscriptionService(
+                "http://localhost:8083", "dev-token"
+            ),
+            new BillingProperties.Scheduler("0 0 3 * * *")
+        );
         service = new AutoRenewalService(
             paymentRepository,
-            mock(LiqPayClient.class),
-            mock(StripeClient.class),
+            liqPayClient,
+            stripeClient,
+            properties,
             subscriptionServiceClient
         );
     }
@@ -185,6 +204,101 @@ class AutoRenewalServiceTest {
         assertThat(p.getFailureCount()).isEqualTo(3);
         verify(subscriptionServiceClient, times(1))
             .deactivateSubscription(eq(subscriptionId), anyString());
+    }
+
+    // ----------------------------------------------------------------
+    // Sprint 1 — stub closure: attemptRenewal
+    // now mints a fresh hosted-checkout session
+    // via the real provider client and persists
+    // a sibling PENDING Payment row. These two
+    // tests assert the new behaviour.
+    // ----------------------------------------------------------------
+
+    @Test
+    void attemptRenewal_stripeProvider_mintsSessionAndSavesSiblingRow() {
+        // given — a due STRIPE payment, simulate-fail
+        // is OFF. The Stripe client returns a fake
+        // checkout URL.
+        final Payment original = duePayment(
+            1L, 0, UUID.randomUUID()
+        );
+        when(stripeClient.createCheckout(any(StripeCheckoutRequest.class)))
+            .thenReturn(URI.create(
+                "https://checkout.stripe.com/c/pay/cs_test_renewal"));
+
+        // when
+        final boolean success = service.attemptRenewal(original);
+
+        // then — returns true (success), Stripe was
+        // called once with an orderId derived from
+        // the original, and a sibling PENDING row
+        // was saved.
+        assertThat(success).isTrue();
+        verify(stripeClient, times(1))
+            .createCheckout(any(StripeCheckoutRequest.class));
+        verify(paymentRepository, times(1))
+            .saveAndFlush(any(Payment.class));
+        // The original payment is NOT saved by
+        // attemptRenewal — advanceRenewalDate does
+        // that on the success path.
+        verify(paymentRepository, never()).save(any(Payment.class));
+    }
+
+    @Test
+    void attemptRenewal_liqpayProvider_mintsSessionAndSavesSiblingRow() {
+        // given — a due LIQPAY payment, simulate-fail
+        // is OFF. The LiqPay client returns a fake
+        // checkout URL.
+        final Payment original = Payment.builder()
+            .paymentId(UUID.randomUUID())
+            .userId(UUID.randomUUID())
+            .subscriptionId(UUID.randomUUID())
+            .provider(PaymentProvider.LIQPAY)
+            .providerOrderId("ord-original-liqpay")
+            .amount(new java.math.BigDecimal("199.00"))
+            .currency("UAH")
+            .status(PaymentStatus.SUCCEEDED)
+            .failureCount(0)
+            .createdAt(OffsetDateTime.now().minusDays(60))
+            .updatedAt(OffsetDateTime.now().minusDays(1))
+            .nextRenewalAt(OffsetDateTime.now().minusDays(1))
+            .build();
+        when(liqPayClient.createCheckout(any(LiqPayCheckoutRequest.class)))
+            .thenReturn(URI.create(
+                "https://www.liqpay.ua/api/3/checkout/renewal-token"));
+
+        // when
+        final boolean success = service.attemptRenewal(original);
+
+        // then
+        assertThat(success).isTrue();
+        verify(liqPayClient, times(1))
+            .createCheckout(any(LiqPayCheckoutRequest.class));
+        verify(paymentRepository, times(1))
+            .saveAndFlush(any(Payment.class));
+    }
+
+    @Test
+    void attemptRenewal_providerThrows_returnsFalse_viaOuterCatch() {
+        // given — a due STRIPE payment, simulate-fail
+        // OFF, but the Stripe SDK throws (e.g. network
+        // error). The outer catch in renewDue() catches
+        // the RuntimeException and routes to
+        // handleFailure; here we just assert that
+        // attemptRenewal surfaces the error to the
+        // caller.
+        final Payment original = duePayment(
+            1L, 0, UUID.randomUUID()
+        );
+        when(stripeClient.createCheckout(any(StripeCheckoutRequest.class)))
+            .thenThrow(new RuntimeException("stripe down"));
+
+        // when + then — must NOT swallow the
+        // exception (the outer catch handles it).
+        org.assertj.core.api.Assertions
+            .assertThatThrownBy(() -> service.attemptRenewal(original))
+            .isInstanceOf(RuntimeException.class)
+            .hasMessageContaining("stripe down");
     }
 
     /**

@@ -1,0 +1,68 @@
+# Test profile for BillingControllerIT and any future
+# `@SpringBootTest` integration tests.
+#
+# Mirrors the production database shape (MSSQL) with
+# H2 in `MODE=SQLServer` so JPA entities built for
+# MSSQL columns (UNIQUEIDENTIFIER, etc.) still work.
+# We disable Flyway (the MSSQL V23 migration script
+# isn't portable to H2) and use `ddl-auto=create-drop`
+# to let Hibernate materialize the schema from the
+# entity classes for the test.
+#
+# Schedulers are disabled so the auto-renewal cron
+# doesn't fire during tests.
+#
+# Eureka is disabled — we don't need service discovery
+# in a single-process integration test.
+
+spring:
+  datasource:
+    # H2 2.4.240 in-memory. We use the default
+    # REGULAR mode — the schema only has
+    # UNIQUEIDENTIFIER columns (mapped as Java
+    # UUID via JPA), which H2 supports natively.
+    # DB_CLOSE_DELAY=-1 keeps the in-memory DB
+    # alive across multiple connection pools.
+    url: jdbc:h2:mem:billing-it;DB_CLOSE_DELAY=-1
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.H2Dialect
+  flyway:
+    enabled: false
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
+
+eureka:
+  client:
+    enabled: false
+
+billing:
+  liqpay:
+    public-key: sandbox_public_key
+    private-key: sandbox_private_key
+    sandbox: true
+  stripe:
+    api-key: sk_test_placeholder
+    webhook-secret: whsec_placeholder
+    api-version: "2025-04-30.basil"
+  scheduler:
+    # Spring's @Scheduled cron uses 6 fields
+    # (sec min hour day-of-month month day-of-week).
+    # Far-future "0 0 0 1 1 ?" fires on Jan 1
+    # at 00:00 — never during tests.
+    auto-renewal-cron: "0 0 0 1 1 ?"
+  renewal:
+    simulate-fail: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health

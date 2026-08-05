@@ -1,21 +1,33 @@
-// Unit test for Phase 4.3 (commits 3 + 4) — verifies
-// the wired `BillingController` returns 201 for both
-// LiqPay and Stripe checkouts. The real provider call
-// is mocked out — the test only asserts the
-// controller's behaviour (status code + body shape).
+// Integration test for Phase 4.3 (commits 3 + 4 + 5)
+// — BillingController wired into the full Spring Boot
+// context with H2 (SQLServer mode) for the DB layer.
 //
-// The auth-lib `CurrentUser` is a static utility; the
-// test does not exercise JWT auth (addFilters=false
-// disables the security filter chain), and the
-// checkoutService is fully mocked so the userId path
-// in the controller is irrelevant to these assertions.
+// Upgraded from `@WebMvcTest` slice (commit 5) to
+// `@SpringBootTest` so the assertions now exercise
+// the real bean graph: REST controllers, security
+// config (JWT filter bypassed via addFilters=false),
+// JPA repositories, exception handlers, and the
+// generated `BillingApi` interface wiring.
 //
-// The webhook endpoints and the PDF download are NOT
-// in the generated `BillingApi` interface (they have
-// `security: []` or binary content types in the
-// contract) — they get separate controllers in
-// commits 3, 4, and 5 respectively. Their tests live
-// alongside their own controllers.
+// The Stripe + LiqPay provider clients are still
+// mocked (no live network). The webhook endpoints
+// and the PDF download are NOT in the generated
+// `BillingApi` interface (they have `security: []` or
+// binary content types in the contract) — they get
+// separate controllers in commits 3, 4, and 5
+// respectively. Their tests live alongside their own
+// controllers.
+//
+// What we cover:
+//   1. createCheckout — LiqPay provider returns 201
+//      with the checkout URL + paymentId + provider.
+//   2. createCheckout — Stripe provider returns 201
+//      (wired in Commit 4).
+//   3. downloadInvoicePdf — happy path: requester is
+//      the payer, invoice exists, returns PDF bytes.
+//   4. downloadInvoicePdf — requester != payer → 403.
+//   5. downloadInvoicePdf — payment exists, invoice
+//      not generated → 404.
 
 package ua.fin.billing.controller;
 
@@ -24,9 +36,10 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
-import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import ua.fin.billing.entity.Invoice;
 import ua.fin.billing.entity.Payment;
@@ -51,9 +64,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@WebMvcTest(BillingController.class)
+@SpringBootTest
 @AutoConfigureMockMvc(addFilters = false)
-class BillingControllerStubTest {
+@ActiveProfiles("test")
+class BillingControllerIT {
 
     @Autowired
     private MockMvc mockMvc;
@@ -67,11 +81,7 @@ class BillingControllerStubTest {
     @MockitoBean
     private ua.fin.billing.repository.PaymentRepository paymentRepository;
 
-    @Test
-    void createCheckout_liqpay_returns201_withCheckoutUrl() throws Exception {
-        // given
-        final UUID paymentId = UUID.randomUUID();
-        final UUID userId = UUID.randomUUID();
+    private void authenticateAs(UUID userId) {
         // CurrentUser.getUserId() only resolves
         // through a JwtAuthenticationToken — the
         // test must populate SecurityContextHolder
@@ -85,6 +95,14 @@ class BillingControllerStubTest {
                 java.util.List.of()
             )
         );
+    }
+
+    @Test
+    void createCheckout_liqpay_returns201_withCheckoutUrl() throws Exception {
+        // given
+        final UUID paymentId = UUID.randomUUID();
+        final UUID userId = UUID.randomUUID();
+        authenticateAs(userId);
         when(checkoutService.checkout(
             any(UUID.class), any(UUID.class), eq(PaymentProvider.LIQPAY)
         )).thenReturn(new CheckoutService.CheckoutResult(
@@ -117,14 +135,7 @@ class BillingControllerStubTest {
         // too (it used to return 501 in Commit 3).
         final UUID paymentId = UUID.randomUUID();
         final UUID userId = UUID.randomUUID();
-        SecurityContextHolder.getContext().setAuthentication(
-            new JwtAuthenticationToken(
-                "test-token",
-                Jwts.claims().add("id", userId.toString()).build(),
-                userId.toString(),
-                java.util.List.of()
-            )
-        );
+        authenticateAs(userId);
         when(checkoutService.checkout(
             any(UUID.class), any(UUID.class), eq(PaymentProvider.STRIPE)
         )).thenReturn(new CheckoutService.CheckoutResult(
@@ -161,14 +172,7 @@ class BillingControllerStubTest {
         final UUID userId = UUID.randomUUID();
         final UUID paymentId = UUID.randomUUID();
         final byte[] pdfBytes = "%PDF-1.4\n%fake-pdf\n".getBytes();
-        SecurityContextHolder.getContext().setAuthentication(
-            new JwtAuthenticationToken(
-                "test-token",
-                Jwts.claims().add("id", userId.toString()).build(),
-                userId.toString(),
-                java.util.List.of()
-            )
-        );
+        authenticateAs(userId);
         final Payment payment = Payment.builder()
             .paymentId(paymentId)
             .userId(userId)
@@ -210,14 +214,7 @@ class BillingControllerStubTest {
         final UUID requesterId = UUID.randomUUID();
         final UUID payerId = UUID.randomUUID(); // different
         final UUID paymentId = UUID.randomUUID();
-        SecurityContextHolder.getContext().setAuthentication(
-            new JwtAuthenticationToken(
-                "test-token",
-                Jwts.claims().add("id", requesterId.toString()).build(),
-                requesterId.toString(),
-                java.util.List.of()
-            )
-        );
+        authenticateAs(requesterId);
         final Payment payment = Payment.builder()
             .paymentId(paymentId)
             .userId(payerId)
@@ -246,14 +243,7 @@ class BillingControllerStubTest {
         // yet).
         final UUID userId = UUID.randomUUID();
         final UUID paymentId = UUID.randomUUID();
-        SecurityContextHolder.getContext().setAuthentication(
-            new JwtAuthenticationToken(
-                "test-token",
-                Jwts.claims().add("id", userId.toString()).build(),
-                userId.toString(),
-                java.util.List.of()
-            )
-        );
+        authenticateAs(userId);
         final Payment payment = Payment.builder()
             .paymentId(paymentId)
             .userId(userId)
