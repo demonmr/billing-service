@@ -1,8 +1,8 @@
 package ua.fin.billing.client.liqpay;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
@@ -36,7 +36,6 @@ import java.util.Base64;
  */
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class LiqPayClient {
 
     /** LiqPay's single hosted-checkout endpoint (prod + sandbox). */
@@ -46,8 +45,51 @@ public class LiqPayClient {
     private final RestClient restClient;
     @Value("${billing.liqpay.public-key}")
     private String liquiPayPrivateKey;
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ObjectMapper objectMapper;
     private final LiqPaySignatureService signatureService;
+
+    /**
+     * Production constructor wired by Spring.
+     * Reads {@code liquiPayPrivateKey} from the
+     * {@code @Value}-annotated field (which is
+     * populated by Spring after construction).
+     * The explicit {@link Autowired} is needed
+     * because Spring can't choose between two
+     * constructors without it.
+     */
+    @Autowired
+    public LiqPayClient(
+        @Qualifier("liquiPayClient") RestClient restClient,
+        ObjectMapper objectMapper,
+        LiqPaySignatureService signatureService
+    ) {
+        this.restClient = restClient;
+        this.objectMapper = objectMapper;
+        this.signatureService = signatureService;
+        // liquiPayPrivateKey is populated by
+        // Spring via @Value after construction.
+    }
+
+    /**
+     * Package-private test constructor — used by
+     * {@code LiqPayClientTest} (mockwebserver) to
+     * inject every dependency explicitly without
+     * a Spring context. The test passes a
+     * {@link BillingProperties} instance
+     * directly so {@code liquiPayPrivateKey}
+     * is set up-front (no @Value).
+     */
+    LiqPayClient(
+        RestClient restClient,
+        ObjectMapper objectMapper,
+        LiqPaySignatureService signatureService,
+        BillingProperties properties
+    ) {
+        this.restClient = restClient;
+        this.objectMapper = objectMapper;
+        this.signatureService = signatureService;
+        this.liquiPayPrivateKey = properties.liqpay().privateKey();
+    }
 
 
 

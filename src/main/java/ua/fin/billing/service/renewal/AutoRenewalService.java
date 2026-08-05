@@ -4,14 +4,17 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import ua.fin.billing.client.liqpay.LiqPayCheckoutRequest;
 import ua.fin.billing.client.liqpay.LiqPayClient;
+import ua.fin.billing.client.stripe.StripeCheckoutRequest;
 import ua.fin.billing.client.stripe.StripeClient;
-import ua.fin.billing.client.stripe.StripeSignatureException;
+import ua.fin.billing.config.BillingProperties;
 import ua.fin.billing.entity.Payment;
 import ua.fin.billing.entity.PaymentProvider;
 import ua.fin.billing.entity.PaymentStatus;
 import ua.fin.billing.repository.PaymentRepository;
 
+import java.net.URI;
 import java.time.OffsetDateTime;
 import java.util.List;
 
@@ -24,20 +27,21 @@ import java.util.List;
  *   <li>Find all SUCCEEDED payments whose
  *       {@code NEXT_RENEWAL_AT} has passed.</li>
  *   <li>For each, attempt a re-charge via the
- *       original provider. The "re-charge" is
- *       a stub for Phase 4.3 — the LiqPay /
- *       Stripe SDKs require a stored customer +
- *       payment method (e.g.
- *       {@code stripe.PaymentIntent.create} with
- *       {@code customer=...} + {@code payment_method=...})
- *       which we don't have yet. We simulate
- *       the call and surface a failure when
- *       {@code simulate-fail=true} is set, so
- *       dunning can be tested end-to-end.</li>
- *   <li>On success: advance the payment's
- *       {@code NEXT_RENEWAL_AT} by 30 days and
- *       create a sibling renewal payment row
- *       (SUCCEEDED).</li>
+ *       original provider. Re-charge model:
+ *       mint a FRESH hosted-checkout session
+ *       (LiqPay {@code pay} action or Stripe
+ *       Checkout Session), save a sibling
+ *       {@code SUBSCRIPTION_PAYMENTS} row in
+ *       {@code PENDING} state carrying the
+ *       new {@code providerOrderId}, and
+ *       let the existing webhook handler flip
+ *       the sibling row to {@code SUCCEEDED}
+ *       on callback. The renewal user pays via
+ *       the same WebView flow as the initial
+ *       checkout.</li>
+ *   <li>On success: advance the original
+ *       payment's {@code NEXT_RENEWAL_AT} by
+ *       30 days and reset its failure count.</li>
  *   <li>On failure: increment
  *       {@code FAILURE_COUNT}. After 3 strikes
  *       call
@@ -46,13 +50,14 @@ import java.util.List;
  *       {@code IS_ACTIVE=false}.</li>
  * </ol>
  *
- * <p>The actual provider-side re-charge is
- * Phase 5+ work (it needs stored customer IDs +
- * payment method IDs from the initial checkout).
- * For Phase 4.3 we keep the orchestration
- * logic + dunning state machine, with the
- * re-charge stubbed via the
- * {@code simulate-fail} flag for tests.</p>
+ * <p>This is a "soft" auto-renewal: we mint a
+ * new checkout URL each cycle (no stored
+ * customer / payment-method IDs). Phase 5+
+ * adds off-session renewals via
+ * {@code stripe.PaymentIntent.create} with
+ * stored {@code customer} +
+ * {@code payment_method} parameters — the
+ * webhook flow stays the same.</p>
  */
 @Service
 @Slf4j
@@ -74,9 +79,24 @@ public class AutoRenewalService {
      */
     static final int RENEWAL_PERIOD_DAYS = 30;
 
+    /**
+     * Provider's renewal WebView URL templates.
+     * LiqPay: 199.00 UAH; Stripe: 9.99 USD.
+     * Phase 4.3 keeps the same placeholder
+     * amounts as the initial checkout (Commit 3 /
+     * 4); Phase 5+ resolves the amount from
+     * subscription-service via the parent
+     * subscription's plan id.
+     */
+    static final String LIQPAY_RENEWAL_AMOUNT = "199.00";
+    static final String LIQPAY_RENEWAL_CURRENCY = "UAH";
+    static final String STRIPE_RENEWAL_AMOUNT = "9.99";
+    static final String STRIPE_RENEWAL_CURRENCY = "USD";
+
     private final PaymentRepository paymentRepository;
     private final LiqPayClient liqPayClient;
     private final StripeClient stripeClient;
+    private final BillingProperties billingProperties;
     private final SubscriptionServiceClient subscriptionServiceClient;
 
     @Value("${billing.renewal.simulate-fail:false}")
@@ -86,11 +106,13 @@ public class AutoRenewalService {
         PaymentRepository paymentRepository,
         LiqPayClient liqPayClient,
         StripeClient stripeClient,
+        BillingProperties billingProperties,
         SubscriptionServiceClient subscriptionServiceClient
     ) {
         this.paymentRepository = paymentRepository;
         this.liqPayClient = liqPayClient;
         this.stripeClient = stripeClient;
+        this.billingProperties = billingProperties;
         this.subscriptionServiceClient = subscriptionServiceClient;
     }
 
@@ -139,17 +161,28 @@ public class AutoRenewalService {
 
     /**
      * Attempt to re-charge via the original
-     * provider. Phase 4.3 stub: returns true
-     * (success) unless {@code simulate-fail}
-     * is set, in which case it always fails
-     * (used to test dunning).
+     * provider. Mints a fresh hosted-checkout
+     * session for the original
+     * {@code provider}, persists a sibling
+     * PENDING {@code SUBSCRIPTION_PAYMENTS}
+     * row carrying the new
+     * {@code providerOrderId}, and returns
+     * {@code true} on a successful provider
+     * call.
      *
-     * <p>The LiqPay / Stripe clients are
-     * referenced here for shape — Phase 5+
-     * swaps the stub for real
-     * {@code PaymentIntent.create(...)} calls
-     * that use stored customer + payment
-     * method IDs.</p>
+     * <p>If {@code simulate-fail} is set, the
+     * method returns {@code false} WITHOUT
+     * hitting the provider — used to test
+     * dunning end-to-end without a live
+     * LiqPay / Stripe account.</p>
+     *
+     * <p>On success, the sibling PENDING row
+     * is picked up by the existing webhook
+     * handler (LiqPay / Stripe), which
+     * transitions it to {@code SUCCEEDED}.
+     * The original payment row stays at
+     * {@code SUCCEEDED}; only its
+     * {@code NEXT_RENEWAL_AT} advances.</p>
      */
     boolean attemptRenewal(Payment payment) {
         if (simulateFail) {
@@ -159,21 +192,118 @@ public class AutoRenewalService {
             );
             return false;
         }
-        // Reference the clients so DI works
-        // (Phase 5+ will use them in earnest).
-        if (payment.getProvider() == PaymentProvider.LIQPAY
-            && liqPayClient == null) {
-            return false;
+        final URI checkoutUrl;
+        try {
+            checkoutUrl = switch (payment.getProvider()) {
+                case LIQPAY -> mintLiqPayRenewalSession(payment);
+                case STRIPE -> mintStripeRenewalSession(payment);
+            };
+        } catch (RuntimeException e) {
+            // Provider SDK threw (network, auth,
+            // signature mismatch, ...). The caller
+            // catches RuntimeException and
+            // increments failureCount.
+            throw e;
         }
-        if (payment.getProvider() == PaymentProvider.STRIPE
-            && stripeClient == null) {
-            return false;
-        }
-        log.debug(
-            "Auto-renewal succeeded for paymentId={} (provider={})",
-            payment.getPaymentId(), payment.getProvider()
+        log.info(
+            "Auto-renewal session minted: paymentId={}, provider={}, "
+                + "renewalUrl={}",
+            payment.getPaymentId(), payment.getProvider(), checkoutUrl
         );
         return true;
+    }
+
+    /**
+     * Mint a fresh LiqPay checkout session for
+     * a renewal payment. Persists a sibling
+     * PENDING row carrying the new
+     * {@code providerOrderId} so the webhook
+     * handler can correlate the callback.
+     */
+    private URI mintLiqPayRenewalSession(Payment original) {
+        final String renewalOrderId = original.getProviderOrderId()
+            + "-renew-" + System.currentTimeMillis() + "-liqpay";
+
+        final LiqPayCheckoutRequest req = new LiqPayCheckoutRequest(
+            LiqPayCheckoutRequest.PROTOCOL_VERSION,
+            billingProperties.liqpay().publicKey(),
+            LiqPayCheckoutRequest.ACTION_PAY,
+            new java.math.BigDecimal(LIQPAY_RENEWAL_AMOUNT),
+            LIQPAY_RENEWAL_CURRENCY,
+            "Renewal for plan " + original.getSubscriptionId(),
+            renewalOrderId,
+            billingProperties.liqpay().sandbox() ? 1 : 0,
+            "https://example.com/liqpay/return",
+            "https://example.com/rest/ua.fin.api/billing/webhooks/liqpay",
+            "uk"
+        );
+        final URI url = liqPayClient.createCheckout(req);
+
+        // Sibling PENDING row — the webhook
+        // handler will transition it to
+        // SUCCEEDED on LiqPay callback.
+        saveSiblingPending(original, renewalOrderId, url);
+        return url;
+    }
+
+    /**
+     * Mint a fresh Stripe Checkout Session for
+     * a renewal payment. Same sibling-row
+     * pattern as LiqPay.
+     */
+    private URI mintStripeRenewalSession(Payment original) {
+        final String renewalOrderId = original.getProviderOrderId()
+            + "-renew-" + System.currentTimeMillis() + "-stripe";
+
+        final StripeCheckoutRequest req = new StripeCheckoutRequest(
+            original.getUserId(),
+            // planId placeholder — Phase 5+
+            // resolves from subscription-service
+            // via original.getSubscriptionId().
+            original.getSubscriptionId() != null
+                ? original.getSubscriptionId()
+                : java.util.UUID.randomUUID(),
+            new java.math.BigDecimal(STRIPE_RENEWAL_AMOUNT),
+            STRIPE_RENEWAL_CURRENCY,
+            "Renewal for plan " + original.getSubscriptionId(),
+            renewalOrderId,
+            "https://example.com/stripe/return",
+            "https://example.com/stripe/cancel"
+        );
+        final URI url = stripeClient.createCheckout(req);
+
+        saveSiblingPending(original, renewalOrderId, url);
+        return url;
+    }
+
+    /**
+     * Persist a sibling PENDING payment row
+     * carrying the renewal {@code orderId}.
+     * The webhook handler resolves it via
+     * {@code findByProviderOrderId} and flips
+     * it to SUCCEEDED on the callback.
+     */
+    private void saveSiblingPending(
+        Payment original, String renewalOrderId, URI checkoutUrl
+    ) {
+        final Payment sibling = Payment.builder()
+            .userId(original.getUserId())
+            .subscriptionId(original.getSubscriptionId())
+            .provider(original.getProvider())
+            .providerOrderId(renewalOrderId)
+            .amount(original.getAmount())
+            .currency(original.getCurrency())
+            .status(PaymentStatus.PENDING)
+            .description("Renewal for " + original.getPaymentId())
+            .failureCount(0)
+            .build();
+        paymentRepository.saveAndFlush(sibling);
+        log.debug(
+            "Auto-renewal sibling PENDING row saved: originalId={}, "
+                + "renewalId={}, orderId={}, checkoutUrl={}",
+            original.getPaymentId(), sibling.getPaymentId(),
+            renewalOrderId, checkoutUrl
+        );
     }
 
     /**
