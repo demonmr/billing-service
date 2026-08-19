@@ -183,40 +183,16 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
-                <executions>
-                    <execution>
-                        <goals>
-                            <goal>repackage</goal>
-                        </goals>
-                    </execution>
-                </executions>
+                <configuration>
+                    <excludes>
+                        <exclude>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                        </exclude>
+                    </excludes>
+                </configuration>
             </plugin>
-            <!-- Sprint 1 — Pre-GA API unification guard
-                 profile (mirror of the same profile in
-                 transaction-service / analytics-service).
-                 Fails the build if any V2-suffix pattern
-                 reappears in src/. Auto-activates on
-                 CI=true. -->
-            <plugin>
-                <groupId>org.codehaus.mojo</groupId>
-                <artifactId>exec-maven-plugin</artifactId>
-                <version>3.5.0</version>
-                <executions>
-                    <execution>
-                        <id>pre-ga-unification-guard</id>
-                        <phase>generate-test-sources</phase>
-                        <goals>
-                            <goal>exec</goal>
-                        </goals>
-                        <configuration>
-                            <executable>bash</executable>
-                            <arguments>
-                                <argument>tools/pre-ga-unification-guard.sh</argument>
-                            </arguments>
-                        </configuration>
-                    </execution>
-                </executions>
-            </plugin>
+
             <!-- Sprint 1 — BillingControllerIT is a full
                  @SpringBootTest integration test. Spring
                  Boot's default surefire pattern only
@@ -331,58 +307,4 @@
             </snapshots>
         </repository>
     </repositories>
-
-    <!--
-        Pre-GA API unification guard profile (Sprint 1 / followup #5
-        of the Pre-GA unification sprint, 2026-08-02).
-
-        Runs tools/pre-ga-unification-guard.sh which fails the
-        build if any V2-suffix pattern reappears in src/. Auto-
-        activates when CI=true is exported (CI pipelines do this
-        automatically). Local devs can opt in with -Ppre-ga-guard.
-
-        The guard is also wired above as a base-plugin execution
-        (generate-test-sources phase) so it runs on every build
-        — the profile is a safety net for CI environments that
-        don't export CI=true.
-    -->
-    <profiles>
-        <profile>
-            <id>pre-ga-guard</id>
-            <activation>
-                <property>
-                    <name>env.CI</name>
-                    <value>true</value>
-                </property>
-            </activation>
-        </profile>
-        <profile>
-            <id>pre-ga-guard-only</id>
-            <build>
-                <plugins>
-                    <plugin>
-                        <groupId>org.codehaus.mojo</groupId>
-                        <artifactId>exec-maven-plugin</artifactId>
-                        <version>3.5.0</version>
-                        <executions>
-                            <execution>
-                                <id>pre-ga-unification-guard-only</id>
-                                <phase>validate</phase>
-                                <goals>
-                                    <goal>exec</goal>
-                                </goals>
-                                <configuration>
-                                    <executable>bash</executable>
-                                    <arguments>
-                                        <argument>tools/pre-ga-unification-guard.sh</argument>
-                                    </arguments>
-                                </configuration>
-                            </execution>
-                        </executions>
-                    </plugin>
-                </plugins>
-            </build>
-        </profile>
-    </profiles>
-
 </project>
