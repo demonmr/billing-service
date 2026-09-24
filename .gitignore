@@ -1,29 +1,84 @@
-HELP.md
+# ─── Maven / Java build artifacts ────────────────────────────────────────────
 target/
+*.class
+*.jar
+*.war
+*.nar
+*.ear
+hs_err_pid*
+replay_pid*
+target/generated-sources/
+target/generated-test-sources/
+.flattened-pom.xml
+
+# ─── Maven wrapper (keep the jar) ────────────────────────────────────────────
+.mvn/wrapper/maven-wrapper.jar
 !.mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/
 
-### STS ###
+# ─── IDE: IntelliJ IDEA ──────────────────────────────────────────────────────
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# ─── IDE: Eclipse / STS ──────────────────────────────────────────────────────
 .apt_generated
 .classpath
 .factorypath
 .project
-.settings
+.settings/
 .springBeans
 .sts4-cache
 
-### IntelliJ IDEA ###
-.idea
-*.iws
-*.iml
-*.ipr
-
-### VS Code ###
+# ─── IDE: VS Code ────────────────────────────────────────────────────────────
 .vscode/
 
-# Generated sources
-target/generated-sources/
+# ─── IDE: NetBeans ───────────────────────────────────────────────────────────
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+build/
 
-# Logs
+# ─── OS junk ─────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ─── Logs / runtime ──────────────────────────────────────────────────────────
 *.log
+logs/
+nohup.out
+
+# ─── Env / secrets (never commit real secrets) ───────────────────────────────
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# ─── Generated client code (subscription-lib ships gen/) ────────────────────
+gen/
+
+# ─── Flutter / Dart (harmless in pure-JVM services) ─────────────────────────
+**/.dart_tool/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/.packages
+**/build/
+**/coverage/
+**/.pub-cache/
+**/.pub/
+
+# ─── Coverage / IDE extras ──────────────────────────────────────────────────
+coverage/
+.nyc_output/
+*.tgz
+
+# ─── HELP.md (Spring Initializr boilerplate) ─────────────────────────────────
+HELP.md
