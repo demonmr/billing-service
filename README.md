@@ -1,5 +1,25 @@
 # billing-service
 
+<!-- META-BLOCK-START -->
+<!-- Оновлено вручну в Sprint 5.1 README harmonization. Значення — з ROADMAP.md. -->
+
+| Tests | Branch | Migrations | Last sprint | Last updated |
+|---|---|---|---|---|
+| **17/17 pass** | `main` | V1–V24 (V23 = `SUBSCRIPTION_PAYMENTS` / `BILLING_INVOICES` / `BILLING_WEBHOOK_EVENTS`; V24 = `shedlock`) | stable (Phase 4.3) | **2026-09-21** |
+
+### Out of scope / Deferred followups
+
+- **Stripe live-mode hand-off** — `STRIPE_SECRET_KEY` та `STRIPE_WEBHOOK_SECRET` зараз у test-mode; потребує merchant onboarding + LiqPay merchant approval (vendor-managed).
+- **Webhook idempotency windows** — `BILLING_WEBHOOK_EVENTS` dedup PK `(provider, event_id)` зрізає дублікати, але немає retention policy / GC job (таблиця росте без обмежень).
+- **Prorated upgrades** — наразі `POST /rest/ua.fin.api/billing/checkout` створює новий `SUBSCRIPTION_PAYMENTS` без prorate credit; downgrade — це `IS_ACTIVE=false` через dunning flow, без рефінансування.
+- **Mobile WebView live keys** — flow depends on real backend prod keys (read-only from config); без vendor onboarding → WebView fallback на sandbox.
+
+### 📝 Migration notes
+
+- Див. `billing-service/src/main/resources/db/migration/V1__*.sql` … `V24__shedlock.sql`. Містить Stripe/LiqPay webhook idempotency tables. Verify via `mvn flyway:info` (Docker-оточення).
+
+<!-- META-BLOCK-END -->
+
 Мікросервіс обробки реальних платежів по підписках через
 **LiqPay (UA)** та **Stripe (EU/US)**. Єдине джерело
 правди для таблиць:
