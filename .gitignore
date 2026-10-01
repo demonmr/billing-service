@@ -65,6 +65,14 @@ nohup.out
 # ─── Generated client code (subscription-lib ships gen/) ────────────────────
 gen/
 
+# ─── Claude Code local config (Sprint 5.10) ─────────────────────────────
+# Per-developer Claude Code session state — never track.
+# The umbrella E:/WORK/fin_app/.gitignore also excludes .claude/;
+# this is defense-in-depth at the per-service level (Sprint 5.11
+# finding: person-setting-service/.claude/settings.local.json slipped
+# through before this exclusion existed).
+.claude/
+
 # ─── Flutter / Dart (harmless in pure-JVM services) ─────────────────────────
 **/.dart_tool/
 **/.flutter-plugins
