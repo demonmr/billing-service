@@ -124,11 +124,46 @@
             <scope>test</scope>
         </dependency>
 
-        <!-- OpenAPI generated nullable support. -->
+        <!-- OpenAPI generated nullable support.
+             Note: jackson-databind-nullable:0.2.6 is
+             Jackson 2.x only — the JsonNullable<T>
+             type is kept as a runtime artifact for
+             generated DTOs, but the JsonNullableModule
+             is NOT registered against the 3.x
+             ObjectMapper. The 2.x ObjectMapper is
+             brought in transitively by
+             spring-boot-starter-web and used by
+             the Stripe SDK + Stripe SDK deps for
+             their own ObjectMapper instantiation.
+             Replacement with @JsonInclude(NON_NULL)
+             + Optional<T> is logged for Sprint 5.8.1. -->
         <dependency>
             <groupId>org.openapitools</groupId>
             <artifactId>jackson-databind-nullable</artifactId>
             <version>0.2.6</version>
+        </dependency>
+
+        <!-- Sprint 5.8 — Jackson 3.x migration (fleet
+             rollout). tools.jackson.core is BOM-managed
+             by spring-boot-starter-parent:4.1.0
+             (version managed to 3.1.4, no <version>
+             tag needed). Spring Boot's
+             JacksonAutoConfiguration auto-detects
+             tools.jackson.core on the classpath and
+             uses it as the default ObjectMapper. The
+             generated OpenAPI DTOs use
+             com.fasterxml.jackson.annotation.* which
+             Jackson 3.x reads via reflection — no
+             code change required. JSR-310 stays on
+             2.x (only 3.0.0-rc2 of
+             jackson-modules-java8 exists, no 3.1.x
+             stable yet) — Spring Boot's auto-config
+             registers JavaTimeModule against the 3.x
+             ObjectMapper so date/time types work
+             without any code change. -->
+        <dependency>
+            <groupId>tools.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
         </dependency>
 
         <!-- Lombok -->
@@ -148,6 +183,20 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Sprint 5.8 — Nimbus JOSE+JWT for the
+             BillingControllerIT, which builds a
+             JWTClaimsSet in-memory to populate
+             SecurityContextHolder (replaces the
+             pre-Sprint-5.8 Jwts.claims().add(...)
+             idiom, which depended on jjwt being on
+             the classpath via auth-lib). Version
+             matches auth-lib's resolved version. -->
+        <dependency>
+            <groupId>com.nimbusds</groupId>
+            <artifactId>nimbus-jose-jwt</artifactId>
+            <version>9.40</version>
             <scope>test</scope>
         </dependency>
         <!-- OkHttp MockWebServer — used by

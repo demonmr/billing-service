@@ -31,7 +31,7 @@
 
 package ua.fin.billing.controller;
 
-import io.jsonwebtoken.Jwts;
+import com.nimbusds.jwt.JWTClaimsSet;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -90,7 +90,7 @@ class BillingControllerIT {
         SecurityContextHolder.getContext().setAuthentication(
             new JwtAuthenticationToken(
                 "test-token",
-                Jwts.claims().add("id", userId.toString()).build(),
+                new JWTClaimsSet.Builder().claim("id", userId.toString()).build(),
                 userId.toString(),
                 java.util.List.of()
             )
