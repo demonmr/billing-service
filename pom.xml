@@ -185,6 +185,20 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- Sprint 5.8 — Nimbus JOSE+JWT for the
+             BillingControllerIT, which builds a
+             JWTClaimsSet in-memory to populate
+             SecurityContextHolder (replaces the
+             pre-Sprint-5.8 Jwts.claims().add(...)
+             idiom, which depended on jjwt being on
+             the classpath via auth-lib). Version
+             matches auth-lib's resolved version. -->
+        <dependency>
+            <groupId>com.nimbusds</groupId>
+            <artifactId>nimbus-jose-jwt</artifactId>
+            <version>9.40</version>
+            <scope>test</scope>
+        </dependency>
         <!-- OkHttp MockWebServer — used by
              LiqPayClientTest (Commit 3) to spin up a
              fake LiqPay endpoint in-process. Comes as a
