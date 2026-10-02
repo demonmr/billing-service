@@ -124,24 +124,21 @@
             <scope>test</scope>
         </dependency>
 
-        <!-- OpenAPI generated nullable support.
-             Note: jackson-databind-nullable:0.2.6 is
-             Jackson 2.x only — the JsonNullable<T>
-             type is kept as a runtime artifact for
-             generated DTOs, but the JsonNullableModule
-             is NOT registered against the 3.x
-             ObjectMapper. The 2.x ObjectMapper is
-             brought in transitively by
-             spring-boot-starter-web and used by
-             the Stripe SDK + Stripe SDK deps for
-             their own ObjectMapper instantiation.
-             Replacement with @JsonInclude(NON_NULL)
-             + Optional<T> is logged for Sprint 5.8.1. -->
-        <dependency>
-            <groupId>org.openapitools</groupId>
-            <artifactId>jackson-databind-nullable</artifactId>
-            <version>0.2.6</version>
-        </dependency>
+        <!-- Sprint 5.8.3 (2026-10-02) — dropped
+             jackson-databind-nullable entirely. With
+             the server generator execution now using
+             useSpringBoot4 + useJackson3 +
+             openApiNullable=false (OpenAPI generator
+             7.25.0), generated DTOs no longer reference
+             org.openapitools.jackson.nullable.JsonNullable<T>
+             — they use jakarta.validation @Nullable
+             and primitive defaults instead. The
+             JsonNullableJackson3Module would only be
+             needed if a 3.x DTO referenced
+             JsonNullable<T>, which it doesn't. The
+             0.2.6 jar (Jackson 2 only, no 3.x module)
+             was kept as a no-op classpath artifact
+             before this sprint. -->
 
         <!-- Sprint 5.8 — Jackson 3.x migration (fleet
              rollout). tools.jackson.core is BOM-managed
@@ -296,7 +293,7 @@
             <plugin>
                 <groupId>org.openapitools</groupId>
                 <artifactId>openapi-generator-maven-plugin</artifactId>
-                <version>7.23.0</version>
+                <version>7.25.0</version>
                 <executions>
                     <execution>
                         <id>generate-java-server</id>
@@ -317,7 +314,9 @@
                                 <apiNameSuffix>Api</apiNameSuffix>
                                 <interfaceOnly>true</interfaceOnly>
                                 <useTags>true</useTags>
-                                <useSpringBoot3>true</useSpringBoot3>
+                                <useSpringBoot4>true</useSpringBoot4>
+                                <useJackson3>true</useJackson3>
+                                <openApiNullable>false</openApiNullable>
                             </configOptions>
                         </configuration>
                     </execution>
