@@ -355,4 +355,78 @@
             </snapshots>
         </repository>
     </repositories>
+
+    <!--
+        Pre-GA API unification guard profile (Sprint 5.8.7).
+
+        Runs tools/pre-ga-unification-guard.sh which fails the
+        build if any V2-suffix pattern reappears in src/. See the
+        header of that script for the exact anti-patterns.
+
+        Usage:
+          mvn verify -Ppre-ga-guard         # run guard + tests
+          mvn verify -Ppre-ga-guard-only   # run guard only (skip tests)
+    -->
+    <profiles>
+        <profile>
+            <id>pre-ga-guard</id>
+            <activation>
+                <property>
+                    <name>env.CI</name>
+                    <value>true</value>
+                </property>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <version>3.5.0</version>
+                        <executions>
+                            <execution>
+                                <id>pre-ga-unification-guard</id>
+                                <phase>generate-test-sources</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>bash</executable>
+                                    <arguments>
+                                        <argument>tools/pre-ga-unification-guard.sh</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        <profile>
+            <id>pre-ga-guard-only</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <version>3.5.0</version>
+                        <executions>
+                            <execution>
+                                <id>pre-ga-unification-guard-only</id>
+                                <phase>validate</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>bash</executable>
+                                    <arguments>
+                                        <argument>tools/pre-ga-unification-guard.sh</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>
