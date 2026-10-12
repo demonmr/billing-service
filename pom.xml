@@ -24,6 +24,12 @@
         <stripe-java.version>32.0.0</stripe-java.version>
         <openpdf.version>2.0.2</openpdf.version>
         <shedlock.version>5.16.0</shedlock.version>
+        <!-- Sprint 5.8.8 — override SB 4.1.0's default jackson-bom
+             pin (3.1.4) to the latest 3.2.x with 0 CVEs
+             (3.2.3 released 2026-09-23). See
+             SPRINT_5_8_4_MAVEN_AUDIT.md item (c). -->
+        <jackson-bom.version>3.2.3</jackson-bom.version>
+        <jackson-2-bom.version>2.22.0</jackson-2-bom.version>
     </properties>
 
     <dependencies>
